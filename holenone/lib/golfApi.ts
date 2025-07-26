@@ -9,6 +9,8 @@ if (!GOOGLE_MAPS_API_KEY) {
     throw new Error('Google Maps API key incorrectly configured or missing.');
 }
 
+const USE_MOCK_DATA = true;
+
 // Types
 interface Course {
     id: string;
@@ -32,19 +34,124 @@ interface BookingResponse {
     status: string;
 }
 
+const mockCourses: Course[] = [
+    {
+        id: 'mock-course-1',
+        name: 'Pebble Beach Golf Links',
+        location: { lat: 36.5681, lng: -121.9486 },
+        type: 'public',
+        city: 'Pebble Beach',
+        state: 'CA',
+    },
+    {
+        id: 'mock-course-2',
+        name: 'Augusta National Golf Club',
+        location: { lat: 33.5030, lng: -82.0199 },
+        type: 'private',
+        city: 'Augusta',
+        state: 'GA',
+    },
+    {
+        id: 'mock-course-3',
+        name: 'St. Andrews Links',
+        location: { lat: 56.3490, lng: -2.8007 },
+        type: 'public',
+        city: 'St Andrews',
+        state: 'SCT',
+    },
+    {
+        id: 'mock-course-4',
+        name: 'Torrey Pines Golf Course',
+        location: { lat: 32.8946, lng: -117.2516 },
+        type: 'public',
+        city: 'La Jolla',
+        state: 'CA',
+    },
+    {
+        id: 'mock-course-5',
+        name: 'Whistling Straits',
+        location: { lat: 43.6374, lng: -87.7367 },
+        type: 'private',
+        city: 'Sheboygan',
+        state: 'WI',
+    },
+    {
+        id: 'mock-course-6',
+        name: 'TPC Sawgrass',
+        location: { lat: 30.1975, lng: -81.3937 },
+        type: 'semi-private',
+        city: 'Ponte Vedra Beach',
+        state: 'FL',
+    },
+    {
+        id: 'mock-course-7',
+        name: 'Bethpage Black',
+        location: { lat: 40.7452, lng: -73.4618 },
+        type: 'public',
+        city: 'Farmingdale',
+        state: 'NY',
+    },
+    {
+        id: 'mock-course-8',
+        name: 'Pinehurst No. 2',
+        location: { lat: 35.1954, lng: -79.4662 },
+        type: 'public',
+        city: 'Pinehurst',
+        state: 'NC',
+    },
+];
+
 const mockTeeTimes = [
     {
-        courseId: 'public-1',
+        courseId: 'mock-course-1',
         times: [
             { time: '2025-08-10T08:00:00', availableSpots: 4 },
             { time: '2025-08-10T09:30:00', availableSpots: 2 },
+            { time: '2025-08-10T11:00:00', availableSpots: 3 },
+            { time: '2025-08-10T14:30:00', availableSpots: 1 },
+        ],
+    },
+    {
+        courseId: 'mock-course-2',
+        times: [
+            { time: '2025-08-10T07:30:00', availableSpots: 4 },
+            { time: '2025-08-10T10:00:00', availableSpots: 2 },
+            { time: '2025-08-10T13:00:00', availableSpots: 4 },
+        ],
+    },
+    {
+        courseId: 'mock-course-3',
+        times: [
+            { time: '2025-08-10T09:00:00', availableSpots: 3 },
+            { time: '2025-08-10T12:30:00', availableSpots: 1 },
+            { time: '2025-08-10T15:00:00', availableSpots: 4 },
         ],
     },
 ];
 
+export const getNearbyCoursesMock = async (lat: number, lng: number): Promise<Course[]> => {
+    // Simulate API delay
+    await new Promise(resolve => setTimeout(resolve, 500));
+    
+    // Filter courses based on proximity (rough calculation for demo)
+    const nearbyThreshold = 5; // degrees (very rough approximation)
+    const nearbyCourses = mockCourses.filter(course => {
+        const latDiff = Math.abs(course.location.lat - lat);
+        const lngDiff = Math.abs(course.location.lng - lng);
+        return latDiff <= nearbyThreshold && lngDiff <= nearbyThreshold;
+    });
+    
+    // If no nearby courses found, return a few random ones for development
+    if (nearbyCourses.length === 0) {
+        return mockCourses.slice(0, 4);
+    }
+    
+    return nearbyCourses;
+};
 
 
-export const getNearbyCourses = async (lat: number, lng: number): Promise<Course[]> => {
+
+export const getNearbyCoursesReal = async (lat: number, lng: number): Promise<Course[]> => {
     const radius = 40000; // ~25 miles
     const url = `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${lat},${lng}&radius=${radius}&type=golf_course&keyword=golf&key=${GOOGLE_MAPS_API_KEY}`;
 
@@ -84,6 +191,16 @@ export const getNearbyCourses = async (lat: number, lng: number): Promise<Course
     } catch (error) {
         console.error('Error fetching nearby golf courses:', error);
         return [];
+    }
+};
+
+export const getNearbyCourses = async (lat: number, lng: number): Promise<Course[]> => {
+    if (USE_MOCK_DATA) {
+        console.log('Using mock data for development');
+        return getNearbyCoursesMock(lat, lng);
+    } else {
+        console.log('Using real Google Maps API');
+        return getNearbyCoursesReal(lat, lng);
     }
 };
 
