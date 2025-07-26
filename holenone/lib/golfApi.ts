@@ -42,20 +42,29 @@ const mockTeeTimes = [
     },
 ];
 
-// --- Main Functions ---
+
 
 export const getNearbyCourses = async (lat: number, lng: number): Promise<Course[]> => {
     const radius = 40000; // ~25 miles
-    const type = 'golf_course';
-
-    const url = `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${lat},${lng}&radius=${radius}&type=${type}&key=${GOOGLE_MAPS_API_KEY}`;
+    const url = `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${lat},${lng}&radius=${radius}&type=golf_course&keyword=golf&key=${GOOGLE_MAPS_API_KEY}`;
 
     try {
         const response = await axios.get(url);
         const results = response.data.results;
 
+        // Filter: Keep results where name or types clearly indicate golf course
+        const filteredResults = results.filter((place: any) => {
+            const name = place.name?.toLowerCase() || '';
+            const types = place.types || [];
+            return (
+                name.includes('golf') ||
+                types.includes('golf_course') ||
+                types.includes('point_of_interest') // extra leniency
+            );
+        });
+
         const courses: Course[] = await Promise.all(
-            results.map(async (place: any) => {
+            filteredResults.map(async (place: any) => {
                 const { city, state } = await getPlaceDetails(place.place_id);
                 return {
                     id: place.place_id,
@@ -64,7 +73,7 @@ export const getNearbyCourses = async (lat: number, lng: number): Promise<Course
                         lat: place.geometry.location.lat,
                         lng: place.geometry.location.lng,
                     },
-                    type: 'public',
+                    type: 'public', // defaulting to public for now
                     city,
                     state,
                 };

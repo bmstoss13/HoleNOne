@@ -1,18 +1,19 @@
-import type { NextApiRequest, NextApiResponse } from 'next';
-import { getTeeTimes } from '../../lib/golfApi';
+import { getFromCache, setCache } from "@/lib/cache";
+import { resolveFacilityId, fetchTeeTimes } from "@/lib/golfScraper";
+import type { NextApiRequest, NextApiResponse } from "next";
 
-// Handler for getting tee times
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-    const { courseId, date } = req.query;
+    const { courseName, date } = req.query;
 
-    if (!courseId || !date) {
-        return res.status(400).json({ error: 'courseId and date are required' });
+    if (!courseName || typeof courseName !== "string") {
+        return res.status(400).json({ error: "Missing courseName" });
     }
-    try{
-        //fetch tee times
-        const times = await getTeeTimes(courseId.toString(), date.toString());
-        res.status(200).json({ times });
-    } catch(error){
-        res.status(500).json({ error: "Error fetching tee times"});
+
+    const resolvedId = await resolveFacilityId(courseName);
+    if (!resolvedId) {
+        return res.status(404).json({ error: "Course not found on GolfNow" });
     }
+
+    const teeTimes = await fetchTeeTimes(resolvedId, date as string || new Date().toISOString().split("T")[0]);
+    return res.status(200).json({ courseName, facilityId: resolvedId, teeTimes });
 }
