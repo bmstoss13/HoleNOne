@@ -14,6 +14,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         const courses = await getNearbyCourses(Number(lat), Number(lng));
         res.status(200).json({ courses });
     } catch(error){
-        console.error("Error fetching courses: " + error);
+        res.status(500).json({ error: "Error fetching golf courses"});
     }
 }
