@@ -1,143 +1,162 @@
-import puppeteer from "puppeteer-extra";
-import StealthPlugin from "puppeteer-extra-plugin-stealth";
-import fetch from "node-fetch";
-puppeteer.use(StealthPlugin());
+import { chromium, Browser, Page } from 'playwright';
 
-import { parse } from "node-html-parser";
-
-export interface TeeTime {
+interface TeeTimeData {
     time: string;
-    price: string;
-    playersAvailable: number;
-    bookingUrl: string;
+    price?: string;
+    availableSlots?: number;
+    bookingUrl?: string;
 }
 
-const facilityCache = new Map<string, string>();
-
-interface Facility {
-    facilityId: string | number;
-    name: string;
-    // add other fields if needed
+interface PageObservation {
+    url: string;
+    title: string;
+    textContent: string; // Simplified text content of the page
+    interactiveElements: Array<{
+        selector: string; // CSS selector
+        type: string; // e.g., 'button', 'input', 'select', 'link'
+        text?: string;
+        value?: string;
+        placeholder?: string;
+        ariaLabel?: string;
+        // Potentially add coordinates for visual-based LLM, but textual is easier
+    }>;
 }
 
-// API response type
-interface FacilitySearchResponse {
-    facilities?: Facility[];
-    data?: Facility[];
-    results?: Facility[];
-    // Handle different possible response structures
-}
+const headlessMode=true; //switch to false if debugging.
 
-// Resolve Facility ID using Puppeteer to bypass protection
-export async function resolveFacilityId(courseName: string): Promise<string | null> {
-    if (facilityCache.has(courseName)) return facilityCache.get(courseName)!;
+export class WebAgent {
+    private browser: Browser | null = null;
+    private page: Page | null = null;
 
-    const searchUrl = `https://www.golfnow.com/api/ui/facilities/search?query=${encodeURIComponent(courseName)}`;
-    console.log("Calling: " + searchUrl);
-
-    const browser = await puppeteer.launch({ 
-        headless: true,
-        args: ['--no-sandbox', '--disable-setuid-sandbox']
-    });
-
-    try {
-        const page = await browser.newPage();
-        
-        // Set realistic viewport and user agent
-        await page.setViewport({ width: 1920, height: 1080 });
-        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36');
-        
-        // Enable request interception to handle API calls
-        await page.setRequestInterception(true);
-        
-        let apiResponse: any = null;
-        
-        page.on('request', (request) => {
-            // Allow all requests to proceed
-            request.continue();
-        });
-        
-        page.on('response', async (response) => {
-            if (response.url().includes('/api/ui/facilities/search')) {
-                try {
-                    const contentType = response.headers()['content-type'];
-                    if (contentType && contentType.includes('application/json')) {
-                        apiResponse = await response.json();
-                        console.log('Captured API response:', apiResponse);
-                    }
-                } catch (error) {
-                    console.error('Error parsing API response:', error);
-                }
-            }
-        });
-
-        // Navigate to GolfNow search page first to establish session
-        await page.goto('https://www.golfnow.com/', { waitUntil: 'networkidle2' });
-        
-        // Wait a bit for any initial scripts to load
-        await new Promise(resolve => setTimeout(resolve, 2000));
-        
-        // Now make the API request
-        await page.goto(searchUrl, { waitUntil: 'networkidle2' });
-        
-        // Give it time to process the API response
-        await new Promise(resolve => setTimeout(resolve, 3000));
-        
-        if (apiResponse) {
-            // Type guard to ensure we have an array
-            let facilities: Facility[] = [];
-            
-            if (Array.isArray(apiResponse)) {
-                facilities = apiResponse as Facility[];
-            } else if (apiResponse && typeof apiResponse === 'object') {
-                const response = apiResponse as FacilitySearchResponse;
-                facilities = response.facilities || response.data || response.results || [];
-            }
-
-            if (Array.isArray(facilities) && facilities.length > 0) {
-                const match = facilities.find((facility: Facility) =>
-                    facility.name?.toLowerCase().includes(courseName.toLowerCase())
-                );
-
-                if (match && match.facilityId) {
-                    const facilityIdString = match.facilityId.toString();
-                    facilityCache.set(courseName, facilityIdString);
-                    return facilityIdString;
-                }
-            }
-        }
-        
-        console.warn("No matching facility found for:", courseName);
-        return null;
-        
-    } catch (error) {
-        console.error("Error during facility search with Puppeteer:", error);
-        return null;
-    } finally {
-        await browser.close();
+    async init() {
+        this.browser = await chromium.launch({ headless: headlessMode });
+        this.page = await this.browser.newPage(); //open new page.
     }
-}
-// Scrape tee times for a given facility and date
-export async function fetchTeeTimes(facilityId: string, date: string): Promise<TeeTime[]> {
-    const browser = await puppeteer.launch();
-    const page = await browser.newPage();
 
-    const golfNowUrl = `https://www.golfnow.com/tee-times/facility/${facilityId}/search#date=${date}`;
-    await page.goto(golfNowUrl, { waitUntil: "domcontentloaded" });
+    async close() {
+        if (this.browser) {
+            await this.browser.close();
+            this.browser=null; 
+            this.page=null;
+        }
+    }
 
-    const content = await page.content();
-    const root = parse(content);
-    const teeTimeElements = root.querySelectorAll(".TeeTimeSearch-results-item");
+    async navigateTo(url: string): Promise<PageObservation | null> {
+        if(!this.page) {
+            await this.init();
+        }
+        try {
+            await this.page!.goto(url, { waitUntil: 'domcontentloaded' });
+            return this.getCurrentPageObservation();
+        } catch(error) {
+            console.error(`Failed to navigate to ${url}:`, error);
+            return null;
+        }
+    }
 
-    const teeTimes: TeeTime[] = teeTimeElements.map(el => {
-        const time = el.querySelector(".time-display")?.text || "N/A";
-        const price = el.querySelector(".price")?.text || "N/A";
-        const players = parseInt(el.querySelector(".player-count")?.text || "0");
-        const bookingUrl = `https://www.golfnow.com${el.querySelector("a")?.getAttribute("href")}`;
+    //LLM-controlled actions! Yay!
 
-        return { time, price, playersAvailable: players, bookingUrl };
-    });
+    async clickElement(selector: string): Promise<PageObservation | null> {
+        if (!this.page) return null;
+        try {
+            await this.page.click(selector);
+            await this.page.waitForLoadState('domcontentloaded'); //Wait for page update
+            return this.getCurrentPageObservation();
+        } catch (error){
+            console.error(`Failed to click element ${selector}:`, error);
+            return null;
+        }
+    }
 
-    await browser.close();
+    async fillInput(selector: string, value: string): Promise<PageObservation | null> {
+        if(!this.page) return null;
+        try {
+            await this.page.fill(selector, value);
+            return this.getCurrentPageObservation();
+        } catch(error){
+            console.error(`Failed to fill input ${selector}:`, error);
+            return null;
+        }
+    }
+
+    async selectOption(selector: string, value: string): Promise<PageObservation | null> {
+        if(!this.page) return null;
+        try{
+            await this.page.selectOption(selector, value);
+            await this.page.waitForLoadState('domcontentloaded');
+            return this.getCurrentPageObservation();
+        } catch (error){
+            console.error(`Failed to select option ${selector}:`, error);
+            return null;
+        }
+    }
+
+
+    async getCurrentPageObservation(): Promise<PageObservation | null> {
+        if (!this.page) return null;
+
+        const url = this.page.url();
+        const title = await this.page.title();
+        const textContent = await this.page.evaluate(() => document.body.innerText);
+
+    const interactiveElements = await this.page.evaluate(() => {
+        const elements = Array.from(document.querySelectorAll('button, a, input, select, textarea'));
+        return elements.map(el => {
+            const tag = el.tagName.toLowerCase();
+            let attributes: any = {
+                selector: `${tag}${el.id ? '#' + el.id : ''}${el.className ? '.' + el.className.split(' ').join('.') : ''}`, // Basic selector
+                type: tag,
+            };
+            if (el instanceof HTMLButtonElement || el instanceof HTMLAnchorElement) {
+                attributes.text = el.textContent?.trim();
+            } else if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
+                attributes.value = el.value;
+                attributes.placeholder = el.placeholder;
+                attributes.type = el.type; //ex: 'text', 'date', 'submit'
+            } else if (el instanceof HTMLSelectElement) {
+                attributes.value = el.value;
+            }
+            if (el.ariaLabel) {
+                attributes.ariaLabel = el.ariaLabel;
+            }
+            return attributes;
+            });
+        });
+
+        return { url, title, textContent, interactiveElements };
+    }
+
+    async findTeeTimes(date: string, numPlayers: number): Promise<TeeTimeData[]> {
+        if(!this.page) return [];
+
+        //eventually need to implement the following:
+        // The LLM (or a meta-prompting layer) would analyze PageObservation
+        // and instruct Playwright on what to click/fill.
+        // For a demo, might need to hardcode logic for 1-2 specific course booking systems.
+
+        // Example: (Highly simplified and would need dynamic LLM interaction)
+        // 1. LLM identifies a date picker.
+        // 2. LLM instructs Playwright: `await this.fillInput('#date-input', date);` or `await this.clickElement('.next-day-button');`
+        // 3. LLM identifies number of players dropdown.
+        // 4. LLM instructs Playwright: `await this.selectOption('#players-select', String(numPlayers));`
+        // 5. LLM identifies search button.
+        // 6. LLM instructs Playwright: `await this.clickElement('#search-tee-times');`
+        // 7. After the page updates, LLM analyzes the `textContent` and `interactiveElements`
+        //    to identify elements that look like tee times.
+
+        // For the initial implementation, feed the PageObservation to LLM API.
+        // The LLM would then "decide" the next action (e.g., click a specific button).
+        //API route would then execute that action via WebAgent.
+        // Placeholder for actual tee time extraction logic (after navigation by LLM):
+    const teeTimes: TeeTimeData[] = [];
+    const elements = await this.page.$$eval('.tee-time-slot, .available-time', (els) =>
+      els.map((el) => ({
+        time: el.textContent?.trim() || '',
+        price: el.querySelector('.price')?.textContent?.trim(),
+      }))
+    );
+    teeTimes.push(...elements);
+
     return teeTimes;
+  }
 }
