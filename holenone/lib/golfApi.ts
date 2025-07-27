@@ -76,7 +76,7 @@ const mockCourses: Course[] = [
         state: 'WI',
     },
     {
-        id: 'mock-course-6',
+        id: 'club-champion-orlando',
         name: 'TPC Sawgrass',
         location: { lat: 30.1975, lng: -81.3937 },
         type: 'semi-private',
@@ -127,6 +127,14 @@ const mockTeeTimes = [
             { time: '2025-08-10T15:00:00', availableSpots: 4 },
         ],
     },
+    {
+        courseId: 'club-champion-orlando',
+        times: [
+            { time: '2025-08-10T09:00:00', availableSpots: 3 },
+            { time: '2025-08-10T12:30:00', availableSpots: 1 },
+            { time: '2025-08-10T15:00:00', availableSpots: 4 },
+        ]
+    }
 ];
 
 export const getNearbyCoursesMock = async (lat: number, lng: number): Promise<Course[]> => {

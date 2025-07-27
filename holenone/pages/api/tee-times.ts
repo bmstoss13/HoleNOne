@@ -1,5 +1,5 @@
 import { getFromCache, setCache } from "@/lib/cache";
-import { resolveFacilityId, fetchTeeTimes } from "@/lib/golfScraper";
+import { resolveFacilityId, fetchTeeTimes } from "@/lib/webAgent";
 import type { NextApiRequest, NextApiResponse } from "next";
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
@@ -11,6 +11,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     const resolvedId = await resolveFacilityId(courseName);
     if (!resolvedId) {
+        console.error("course not found on golfnow: " + resolvedId);
         return res.status(404).json({ error: "Course not found on GolfNow" });
     }
 
