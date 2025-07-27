@@ -19,6 +19,7 @@ interface Course {
     type: string;
     city: string;
     state: string;
+    website?: string;
 }
 
 interface TeeTime {
@@ -234,6 +235,34 @@ export const getPlaceDetails = async (placeId: string): Promise<{ city: string; 
         return { city: '', state: '' };
     }
 };
+
+export const getCourseDetails = async (courseId: string): Promise<Course | null> => {
+    if (USE_MOCK_DATA) {
+        return mockCourses.find(course => course.id === courseId) || null;
+    } else {
+        const url = `https://maps.googleapis.com/maps/api/place/details/json?place_id=${courseId}&fields=name,geometry,website,address_component&key=${GOOGLE_MAPS_API_KEY}`;
+        try {
+            const response = await axios.get(url);
+            const result = response.data.result;
+            if (result) {
+                const { city, state } = await getPlaceDetails(courseId);
+                return {
+                    id: result.place_id,
+                    name: result.name,
+                    location: { lat: result.geometry.location.lat, lng: result.geometry.location.lng },
+                    type: 'public', //Default
+                    city,
+                    state,
+                    website: result.website
+                }
+            }
+            return null;
+
+        } catch (error){
+            return null;
+        }
+    }
+}
 
 export const getTeeTimes = async (courseId: string, date: string): Promise<TeeTime[]> => {
     return mockTeeTimes.find((t) => t.courseId === courseId)?.times || [];

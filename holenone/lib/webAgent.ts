@@ -28,6 +28,10 @@ export class WebAgent {
     private browser: Browser | null = null;
     private page: Page | null = null;
 
+    public get currentPage(): Page | null {
+        return this.page;
+    }
+
     async init() {
         this.browser = await chromium.launch({ headless: headlessMode });
         this.page = await this.browser.newPage(); //open new page.
@@ -126,37 +130,106 @@ export class WebAgent {
         return { url, title, textContent, interactiveElements };
     }
 
-    async findTeeTimes(date: string, numPlayers: number): Promise<TeeTimeData[]> {
-        if(!this.page) return [];
+  async findTeeTimes(date: string, numPlayers: number): Promise<TeeTimeData[]> {
+        if (!this.page) return [];
 
-        //eventually need to implement the following:
-        // The LLM (or a meta-prompting layer) would analyze PageObservation
-        // and instruct Playwright on what to click/fill.
-        // For a demo, might need to hardcode logic for 1-2 specific course booking systems.
+        const teeTimes: TeeTimeData[] = [];
 
-        // Example: (Highly simplified and would need dynamic LLM interaction)
-        // 1. LLM identifies a date picker.
-        // 2. LLM instructs Playwright: `await this.fillInput('#date-input', date);` or `await this.clickElement('.next-day-button');`
-        // 3. LLM identifies number of players dropdown.
-        // 4. LLM instructs Playwright: `await this.selectOption('#players-select', String(numPlayers));`
-        // 5. LLM identifies search button.
-        // 6. LLM instructs Playwright: `await this.clickElement('#search-tee-times');`
-        // 7. After the page updates, LLM analyzes the `textContent` and `interactiveElements`
-        //    to identify elements that look like tee times.
+        // Strategy 1: Look for common tee time patterns
+        const genericTimeElements = await this.page.$$eval(
+        '.tee-time-slot, .time-slot, [data-testid*="tee-time"], [aria-label*="tee time"]',
+        (elements) =>
+            elements.map((el) => {
+            // Attempt to extract time, price, and availability from common places
+            const time = el.textContent?.match(/\d{1,2}:\d{2}\s?(AM|PM)?/i)?.[0] || el.getAttribute('data-time') || '';
+            const price = el.querySelector('.price, .fee, [data-price]')?.textContent?.trim() || el.getAttribute('data-price') || '';
+            const availableSlots = el.textContent?.match(/(\d+)\s*spots|\s*(\d+)\s*players/i)?.[1] || el.getAttribute('data-available-slots');
 
-        // For the initial implementation, feed the PageObservation to LLM API.
-        // The LLM would then "decide" the next action (e.g., click a specific button).
-        //API route would then execute that action via WebAgent.
-        // Placeholder for actual tee time extraction logic (after navigation by LLM):
-    const teeTimes: TeeTimeData[] = [];
-    const elements = await this.page.$$eval('.tee-time-slot, .available-time', (els) =>
-      els.map((el) => ({
-        time: el.textContent?.trim() || '',
-        price: el.querySelector('.price')?.textContent?.trim(),
-      }))
-    );
-    teeTimes.push(...elements);
+            return {
+                time: time,
+                price: price || undefined,
+                availableSlots: availableSlots ? parseInt(availableSlots, 10) : undefined,
+                // We can't always get a direct booking URL for a specific slot without navigating more
+                // bookingUrl: el.href // If it's an anchor tag with a direct link
+            };
+            }).filter(t => t.time) // Filter out elements that didn't yield a recognizable time
+        );
+        teeTimes.push(...genericTimeElements);
 
-    return teeTimes;
+        // Strategy 2: If the above is too generic, the LLM's `interactiveElements`
+        // might contain more specific hints. We could feed the LLM's "thought"
+        // or further instructions into this function.
+        // For now, it's a generic scan.
+
+        // Filter by requested number of players (if applicable and detected)
+        const filteredTeeTimes = teeTimes.filter(t => t.availableSlots === undefined || t.availableSlots >= numPlayers);
+
+        // Sort by time
+        filteredTeeTimes.sort((a, b) => {
+        const timeA = new Date(`2000/01/01 ${a.time}`); // Use a dummy date for time comparison
+        const timeB = new Date(`2000/01/01 ${b.time}`);
+        return timeA.getTime() - timeB.getTime();
+        });
+
+        return filteredTeeTimes;
+    }
+  async initiateBooking(teeTime: TeeTimeData, userDetails: { name: string; email: string; phone: string }): Promise<{ success: boolean; confirmationUrl?: string; message: string }> {
+    if (!this.page) return { success: false, message: 'Agent not initialized.' };
+
+    try {
+      // Again, this is highly dependent on the target website.
+      // The LLM would generate the sequence of actions.
+
+      // Example sequence for a known booking form:
+      // 1. Click on the specific tee time element if not already on the booking form.
+      //    This might be handled by the LLM choosing the `initiate_booking_flow` tool.
+      //    If teeTime.bookingUrl exists, navigate there.
+      if (teeTime.bookingUrl) {
+          await this.navigateTo(teeTime.bookingUrl);
+      } else {
+          // Assuming the LLM has already clicked the tee time and we are on the booking form
+          // Or LLM specifies which element to click to begin booking
+          // e.g. await this.clickElement(teeTime.selector);
+      }
+      await this.page.waitForLoadState('domcontentloaded');
+
+      // 2. Fill out player details
+      await this.fillInput('#player-name-input', userDetails.name);
+      await this.fillInput('#player-email-input', userDetails.email);
+      await this.fillInput('#player-phone-input', userDetails.phone);
+      // ... potentially more fields for multiple players ...
+
+      // 3. Handle any waivers or checkboxes
+      // await this.clickElement('#agree-checkbox');
+
+      // 4. Click the "Confirm Booking" or "Proceed to Payment" button
+      // IMPORTANT: For the challenge, you need to reach the point where the booking
+      // is *actual*. This means you might need to bypass or simulate payment.
+      // For public courses, this often means completing the form and clicking a
+      // "Book Now" or "Complete Reservation" button.
+      // If payment is required, you'd get to the payment page.
+      // The rule "cancel later (not AI required)" implies you manually handle payment/cancellation.
+
+      // LLM would choose the appropriate selector:
+      await this.clickElement('button:has-text("Confirm Booking"), button:has-text("Complete Reservation"), input[type="submit"][value="Book Now"]');
+
+      await this.page.waitForNavigation({ waitUntil: 'networkidle' }); // Wait for booking confirmation page
+
+      // 5. Check for confirmation
+      const currentUrl = this.page.url();
+      const pageText = (await this.page.textContent('body')) ?? '';
+
+      if (currentUrl.includes('confirmation') || pageText.includes('Booking Confirmed') || pageText.includes('Thank you for your reservation')) {
+        return { success: true, confirmationUrl: currentUrl, message: 'Tee time successfully initiated/booked.' };
+      } else {
+        // Look for common error messages
+        const errorMessage = await this.page.textContent('.error-message, .alert-danger');
+        return { success: false, message: `Booking failed or not confirmed. Current URL: ${currentUrl}. Message: ${errorMessage || 'No specific error message found.'}` };
+      }
+
+    } catch (error) {
+      console.error(`Error during booking:`, error);
+      return { success: false, message: `An error occurred during the booking process: ${(error as Error).message}` };
+    }
   }
 }
