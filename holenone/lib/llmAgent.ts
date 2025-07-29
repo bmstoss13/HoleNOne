@@ -1,67 +1,78 @@
-import { GoogleGenerativeAI, FunctionCallingMode } from '@google/generative-ai';
+import { GoogleGenerativeAI, HarmCategory, HarmBlockThreshold, FunctionCallingMode, FunctionCall } from '@google/generative-ai';
+import dotenv from 'dotenv';
+dotenv.config();
 
-// Ensure you have your API key for the LLM configured securely
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY || 'YOUR_GEMINI_API_KEY';
-const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
-
-interface ToolCall {
-  name: string;
-  args: Record<string, any>;
+const API_KEY = process.env.GEMINI_API_KEY; // Ensure you have GEMINI_API_KEY in your .env
+if (!API_KEY) {
+  throw new Error('GEMINI_API_KEY is not set in environment variables.');
 }
 
-interface LLMResult {
-  toolCall: ToolCall | null;
-  response: string; // Direct text response from LLM
-  thought: string; // LLM's reasoning
-}
+const genAI = new GoogleGenerativeAI(API_KEY);
 
-export async function queryLLM(prompt: string, tools: any[]): Promise<LLMResult> {
-  const model = genAI.getGenerativeModel({ 
-    model: 'gemini-2.0-flash-exp', // Updated to latest model name
-    tools 
-  });
+// Use a stable model that supports function calling, e.g., 'gemini-1.0-pro'
+// 'gemini-2.0-flash-exp' might have specific quirks or be an experimental model
+// It's safer to use 'gemini-1.5-flash' or 'gemini-1.0-pro' for robust function calling.
+// Let's use 'gemini-1.5-flash' as it's the newer, faster option.
+const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
 
+export async function queryLLM(prompt: string, toolDefinitions: any[]) { // Renamed 'tools' to 'toolDefinitions' for clarity
   try {
     const result = await model.generateContent({
       contents: [{ role: 'user', parts: [{ text: prompt }] }],
+      // THIS IS THE CRUCIAL CHANGE IN STRUCTURE
+      tools: toolDefinitions.map(tool => ({
+        functionDeclarations: [
+          {
+            name: tool.name,
+            description: tool.description,
+            parameters: tool.parameters,
+          },
+        ],
+      })),
       toolConfig: {
         functionCallingConfig: {
-          mode: FunctionCallingMode.AUTO, // Use the enum instead of string
-          allowedFunctionNames: tools.map(tool => tool.name)
-        }
-      }
+          mode: FunctionCallingMode.AUTO, // Or 'ANY', 'NONE'
+          // allowedFunctionNames: ['navigateTo', 'clickElement', 'fillInput', 'selectOption', 'findTeeTimesOnPage', 'completeBookingForm'] // Optional: specify allowed functions
+        },
+      },
+      safetySettings: [
+        {
+          category: HarmCategory.HARM_CATEGORY_HARASSMENT,
+          threshold: HarmBlockThreshold.BLOCK_NONE,
+        },
+        {
+          category: HarmCategory.HARM_CATEGORY_HATE_SPEECH,
+          threshold: HarmBlockThreshold.BLOCK_NONE,
+        },
+        {
+          category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
+          threshold: HarmBlockThreshold.BLOCK_NONE,
+        },
+        {
+          category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+          threshold: HarmBlockThreshold.BLOCK_NONE,
+        },
+      ],
     });
 
     const response = result.response;
-    
-    // Check for function calls
-    const functionCalls = response.functionCalls();
+    const toolCalls = response.functionCalls(); // This returns an array of FunctionCall objects
+    const toolCall = toolCalls && toolCalls.length > 0 ? toolCalls[0] : undefined;
     const textResponse = response.text();
+    const thought = response.candidates?.[0]?.content?.parts?.[0]?.text || ''; // Extract thought if available
 
-    if (functionCalls && functionCalls.length > 0) {
-      // Handle the first function call (adjust for multiple if needed)
-      const functionCall = functionCalls[0];
-      return {
-        toolCall: {
-          name: functionCall.name,
-          args: functionCall.args || {},
-        },
-        response: textResponse || '', // LLM might still provide some text
-        thought: `LLM decided to call function: ${functionCall.name}`
-      };
+    if (toolCall) {
+      return { toolCall: { name: toolCall.name, args: toolCall.args }, response: textResponse, thought: thought };
     } else {
-      return {
-        toolCall: null,
-        response: textResponse || "No specific action or tee times found. Please check manually.",
-        thought: 'LLM provided a textual response without function calls.'
-      };
+      return { response: textResponse, thought: thought };
     }
-  } catch (error) {
+
+  } catch (error: any) {
     console.error('Error querying LLM:', error);
-    return {
-      toolCall: null,
-      response: "I encountered an error while processing your request. Please try again.",
-      thought: `Error occurred: ${error instanceof Error ? error.message : 'Unknown error'}`
-    };
+    // Attempt to parse the error details if available from GoogleGenerativeAIError
+    const errorMessage = error.message || 'An unknown error occurred.';
+    const errorDetails = error.errorDetails ? JSON.stringify(error.errorDetails) : '';
+
+    throw new Error(`Error querying LLM: ${errorMessage} ${errorDetails}`);
   }
 }

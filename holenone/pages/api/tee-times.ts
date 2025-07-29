@@ -60,38 +60,63 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     // --- LLM Decision Loop ---
     const tools = [
-      {
-        name: 'navigateTo',
-        description: 'Navigates the browser to a given URL.',
-        parameters: { type: 'object', properties: { url: { type: 'string' } }, required: ['url'] }
-      },
-      {
-        name: 'clickElement',
-        description: 'Clicks an element on the current page using a CSS selector.',
-        parameters: { type: 'object', properties: { selector: { type: 'string' } }, required: ['selector'] }
-      },
-      {
-        name: 'fillInput',
-        description: 'Fills an input field on the current page using a CSS selector and a value.',
-        parameters: { type: 'object', properties: { selector: { type: 'string' }, value: { type: 'string' } }, required: ['selector', 'value'] }
-      },
-      {
-        name: 'selectOption',
-        description: 'Selects an option from a dropdown (select) element using a CSS selector and a value.',
-        parameters: { type: 'object', properties: { selector: { type: 'string' }, value: { type: 'string' } }, required: ['selector', 'value'] }
-      },
-      {
-        name: 'findTeeTimesOnPage',
-        description: 'Analyzes the current page to extract available tee times and their details. Only call this when you believe you are on a tee time availability page.',
-        parameters: { type: 'object', properties: {} }
-      }
+        {
+            name: 'navigateTo',
+            description: 'Navigates the browser to a given URL.',
+            parameters: { type: 'object', properties: { url: { type: 'string' } }, required: ['url'] }
+        },
+        {
+            name: 'clickElement',
+            description: 'Clicks an element on the current page using a CSS selector.',
+            parameters: { type: 'object', properties: { selector: { type: 'string' } }, required: ['selector'] }
+        },
+        {
+            name: 'fillInput',
+            description: 'Fills an input field on the current page using a CSS selector and a value.',
+            parameters: { type: 'object', properties: { selector: { type: 'string' }, value: { type: 'string' } }, required: ['selector', 'value'] }
+        },
+        {
+            name: 'selectOption',
+            description: 'Selects an option from a dropdown (select) element using a CSS selector and a value.',
+            parameters: { type: 'object', properties: { selector: { type: 'string' }, value: { type: 'string' } }, required: ['selector', 'value'] }
+        },
+        {
+          name: 'findTeeTimesOnPage',
+          description: `Call this when you believe you have navigated to the correct page for displaying tee times, and the tee times for ${numPlayers} players on ${date} are visible or can be extracted. If a direct list of times is not found but form elements (date picker, time picker, player count) are present, the tool will return an empty list, and the AI should then use other tools to interact with the form.`,
+          parameters: { type: 'object', properties: {}, required: [] }
+        },
+        {
+            name: 'selectBookingDate',
+            description: 'Selects a specific date in a date picker element.',
+            parameters: { type: 'object', properties: { selector: { type: 'string' }, date: { type: 'string', 
+                // format: 'date' 
+            } }, required: ['selector', 'date'] }
+        },
+        {
+            name: 'setNumPlayers',
+            description: 'Sets the number of players in a numerical input or selector.',
+            parameters: { type: 'object', properties: { selector: { type: 'string' }, numPlayers: { type: 'number' } }, required: ['selector', 'numPlayers'] }
+        },
+        {
+            name: 'selectBookingTime',
+            description: 'Selects a specific time from a time picker or list of time slots.',
+            parameters: { type: 'object', properties: { selector: { type: 'string' }, time: { type: 'string' } }, required: ['selector', 'time'] }
+        },
+        {
+            name: 'clickSubmitBookingSearch',
+            description: 'Clicks the button to submit the booking criteria form.',
+            parameters: { type: 'object', properties: { selector: { type: 'string' } }, required: ['selector'] }
+        }
     ];
 
     let actionResponse;
     let teeTimesFound: TeeTimeData[] = [];
-    let thoughtProcess = '';
+    let thoughtProcess = 'Starting to analyze the page.';
     let statusMessage = 'Analyzing page...';
     let maxIterations = 5; // Allow for multiple steps (e.g., click date picker, select date, click search)
+    let finalRedirectUrl: string | undefined = undefined;
+
+    let currentAgentObservation = currentObservation;
 
     for (let i = 0; i < maxIterations; i++) {
       console.log(`LLM Interaction Iteration ${i + 1}`);
@@ -120,13 +145,17 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         console.log(`LLM decided to call tool: ${name} with args:`, args);
 
         if (name === 'navigateTo') {
-          currentObservation = await agent.navigateTo(args.url);
+            const { url } = args as { url: string }; // Type assertion
+            currentObservation = await agent.navigateTo(url);
         } else if (name === 'clickElement') {
-          currentObservation = await agent.clickElement(args.selector);
+            const { selector } = args as { selector: string }; // Type assertion
+            currentObservation = await agent.clickElement(selector);
         } else if (name === 'fillInput') {
-          currentObservation = await agent.fillInput(args.selector, args.value);
+            const { selector, value } = args as { selector: string; value: string }; // Type assertion
+            currentObservation = await agent.fillInput(selector, value);
         } else if (name === 'selectOption') {
-          currentObservation = await agent.selectOption(args.selector, args.value);
+          const { selector, value } = args as { selector: string; value: string }; // Type assertion
+          currentObservation = await agent.selectOption(selector, value);
         } else if (name === 'findTeeTimesOnPage') {
           // This is where `findTeeTimes` on `WebAgent` needs to be smart.
           // For now, it will look for common patterns, but for a real system,
@@ -134,14 +163,17 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           teeTimesFound = await agent.findTeeTimes(date, numPlayers);
           statusMessage = 'Tee times extracted successfully!';
           break; // Exit loop, we found times
-        }
-
+        } 
         if (!currentObservation) {
           statusMessage = 'An error occurred during web interaction, page might not have loaded correctly.';
           break;
         }
       } else if (llmResult.response.includes('no_action_needed') || llmResult.response.includes('cannot determine a clear next action')) {
-        statusMessage = llmResult.response;
+        statusMessage = llmResult.response || 'AI could not determine how to find tee times.';
+        if (currentAgentObservation?.url) {
+            finalRedirectUrl = currentAgentObservation.url;
+            statusMessage += ` You may need to complete the booking manually at: ${finalRedirectUrl}`;
+        }
         break; // LLM is done or stuck
       } else {
         // LLM provided a textual response, not a tool call. Could be clarifying or indicating a halt.
@@ -155,11 +187,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       observation: currentObservation,
       status: statusMessage,
       thought: thoughtProcess,
+      message: statusMessage,
+      redirectUrl: finalRedirectUrl,
     });
 
   } catch (error) {
     console.error('Error in tee-times API:', error);
-    res.status(500).json({ message: 'Internal server error while retrieving tee times.', error: (error as Error).message });
+    res.status(500).json({ message: 'Internal server error while retrieving tee times.', error: (error as Error).message});
   } finally {
     // Agent cleanup is handled by timeout; no explicit close here for potential follow-up actions
   }

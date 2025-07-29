@@ -22,7 +22,7 @@ interface PageObservation {
     }>;
 }
 
-const headlessMode=true; //switch to false if debugging.
+const headlessMode=false; //switch to false if debugging.
 
 export class WebAgent {
     private browser: Browser | null = null;
@@ -33,8 +33,18 @@ export class WebAgent {
     }
 
     async init() {
-        this.browser = await chromium.launch({ headless: headlessMode });
-        this.page = await this.browser.newPage(); //open new page.
+        this.browser = await chromium.launch({ 
+            headless: headlessMode,
+            slowMo: 500, 
+            args: [
+                '--start-maximized',
+                '--force-device-scale-factor=1', // <-- ADD THIS LINE
+                '--window-size=1920,1080'
+            ]
+        });
+        this.page = await this.browser.newPage({
+            viewport: { width: 1920, height: 1080}
+        }); //open new page.
     }
 
     async close() {
@@ -130,43 +140,56 @@ export class WebAgent {
         return { url, title, textContent, interactiveElements };
     }
 
-  async findTeeTimes(date: string, numPlayers: number): Promise<TeeTimeData[]> {
+    async findTeeTimes(date: string, numPlayers: number): Promise<TeeTimeData[]> {
         if (!this.page) return [];
 
-        const teeTimes: TeeTimeData[] = [];
+        console.log(`WebAgent: Attempting to find tee times for date: ${date}, players: ${numPlayers}`);
 
-        // Strategy 1: Look for common tee time patterns
+        // Check for common date/time/player selectors, indicative of a booking form
+        const hasDatePicker = await this.page.$('input[type="date"], [data-testid*="date-picker"], #date-selector');
+        const hasTimePicker = await this.page.$('input[type="time"], [data-testid*="time-picker"], #time-selector, .time-slot-picker');
+        const hasPlayerSelector = await this.page.$('input[type="number"][min="1"][max="4"], [data-testid*="player-selector"], #player-count');
+
+        // If these elements are present, it suggests a form-based booking flow
+        if (hasDatePicker && hasTimePicker && hasPlayerSelector) {
+            console.log("WebAgent: Detected a form-based booking interface.");
+            // The agent could then attempt to interact with these elements
+            // (This part would ideally be driven by further LLM tool calls)
+
+            // For now, if it's a form, we'll return an empty array and the LLM will get 'no tee times found'.
+            // The key is that the LLM's next action might be to use 'fillInput'/'clickElement'
+            // based on this knowledge, rather than expecting a 'list'.
+
+            // You would likely have *another* tool for the LLM called something like:
+            // `interactWithBookingForm(date: string, numPlayers: number, time?: string)`
+            // which would then use fillInput/selectOption on specific form elements.
+            // For the current setup, if this is returned, it effectively tells the LLM "I didn't find *a list* of times"
+            // but the prompt needs to guide it that it can then use `fillInput` or `clickElement`.
+            return [];
+        }
+
+        // --- Original tee time extraction logic for list-based sites ---
+        const teeTimes: TeeTimeData[] = [];
         const genericTimeElements = await this.page.$$eval(
         '.tee-time-slot, .time-slot, [data-testid*="tee-time"], [aria-label*="tee time"]',
         (elements) =>
             elements.map((el) => {
-            // Attempt to extract time, price, and availability from common places
             const time = el.textContent?.match(/\d{1,2}:\d{2}\s?(AM|PM)?/i)?.[0] || el.getAttribute('data-time') || '';
             const price = el.querySelector('.price, .fee, [data-price]')?.textContent?.trim() || el.getAttribute('data-price') || '';
-            const availableSlots = el.textContent?.match(/(\d+)\s*spots|\s*(\d+)\s*players/i)?.[1] || el.getAttribute('data-available-slots');
+            const availableSpots = el.textContent?.match(/(\d+)\s*spots|\s*(\d+)\s*players/i)?.[1] || el.getAttribute('data-available-spots');
 
             return {
                 time: time,
                 price: price || undefined,
-                availableSlots: availableSlots ? parseInt(availableSlots, 10) : undefined,
-                // We can't always get a direct booking URL for a specific slot without navigating more
-                // bookingUrl: el.href // If it's an anchor tag with a direct link
+                availableSpots: availableSpots ? parseInt(availableSpots, 10) : undefined,
             };
-            }).filter(t => t.time) // Filter out elements that didn't yield a recognizable time
+            }).filter(t => t.time)
         );
         teeTimes.push(...genericTimeElements);
 
-        // Strategy 2: If the above is too generic, the LLM's `interactiveElements`
-        // might contain more specific hints. We could feed the LLM's "thought"
-        // or further instructions into this function.
-        // For now, it's a generic scan.
-
-        // Filter by requested number of players (if applicable and detected)
         const filteredTeeTimes = teeTimes.filter(t => t.availableSlots === undefined || t.availableSlots >= numPlayers);
-
-        // Sort by time
         filteredTeeTimes.sort((a, b) => {
-        const timeA = new Date(`2000/01/01 ${a.time}`); // Use a dummy date for time comparison
+        const timeA = new Date(`2000/01/01 ${a.time}`);
         const timeB = new Date(`2000/01/01 ${b.time}`);
         return timeA.getTime() - timeB.getTime();
         });

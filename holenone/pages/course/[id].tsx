@@ -3,7 +3,6 @@ import { useRouter } from 'next/router';
 import { useState, useEffect } from 'react';
 // Assuming you have a type for Course and TeeTime
 import type { Course, TeeTime } from '../../types/golf'; // Define these types
-import { getCourseDetails } from '../../lib/golfApi'
 
 interface LLMResponse {
     teeTimes: TeeTime[];
@@ -11,6 +10,7 @@ interface LLMResponse {
     status: string; // Message from the AI (e.g., "Analyzing page...", "Tee times found.")
     thought: string; // LLM's internal thought process for debugging
     message?: string;
+    redirectUrl?: string;
 }
 
 export default function CourseDetail() {
@@ -28,6 +28,7 @@ export default function CourseDetail() {
     const [userEmail, setUserEmail] = useState('');
     const [userPhone, setUserPhone] = useState('');
     const [bookingStatus, setBookingStatus] = useState<string | null>(null);
+    const [redirectUrl, setRedirectUrl] = useState<string | null>(null);
 
     const handleBookTeeTime = async (teeTime: TeeTime) => {
         if (!course || !userName || !userEmail || !userPhone) {
@@ -119,47 +120,66 @@ export default function CourseDetail() {
     const sessionId = "user_session_abc"; // Generate a unique session ID per user/tab
 
     const handleFindTeeTimes = async () => {
-        if (!course || !searchDate || !numPlayers) {
-        setError('Please select a date and number of players.');
-        return;
-        }
-
         setLoading(true);
         setError(null);
         setTeeTimes([]);
-        setConversationHistory(prev => [...prev, { role: 'user', message: `Find tee times for ${numPlayers} players on ${searchDate}.` }]);
+        setConversationHistory([]);
+        setRedirectUrl(null); // Clear redirect URL on new search
+
+        if (!course || !searchDate || !numPlayers) {
+        setError('Please select a course, date, and number of players.');
+        setLoading(false);
+        return;
+        }
 
         try {
         const response = await fetch('/api/tee-times', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {
+            'Content-Type': 'application/json',
+            },
             body: JSON.stringify({
+            sessionId,
             courseId: course.id,
             date: searchDate,
-            numPlayers: numPlayers,
-            sessionId: sessionId,
-            userMessage: `Find tee times for ${numPlayers} players on ${searchDate}.`,
-            lastObservation: lastObservation, // Pass the observation for chained calls
+            numPlayers,
+            currentObservation: lastObservation, // Pass the last observation
             }),
         });
 
-        const data: LLMResponse = await response.json();
-        setLastObservation(data.observation); // Save for next interaction
+        const data: LLMResponse = await response.json(); // Use the updated LLMResponse type
 
         if (response.ok) {
-            setTeeTimes(data.teeTimes);
+            setTeeTimes(data.teeTimes || []);
+            setLastObservation(data.observation);
+            // Add LLM's status/thought to history
             setConversationHistory(prev => [...prev, { role: 'ai', message: data.status, thought: data.thought }]);
-            if (data.teeTimes.length === 0) {
-            setError('No tee times found for the selected criteria. AI status: ' + data.status);
+
+            // NEW: Handle redirect URL
+            if (data.redirectUrl) {
+            setRedirectUrl(data.redirectUrl);
+            setError(`AI got stuck. You may need to manually complete the process. Click the link to continue: ${data.redirectUrl}`);
+            } else if (data.teeTimes && data.teeTimes.length === 0) {
+            // No tee times found, but not a redirect case
+            setError(data.message || 'No tee times found for the selected criteria.');
+            } else {
+                // Success case, tee times found
+                setError(null); // Clear any previous errors
             }
+
         } else {
+            // Error from API route
             setError(data.message || 'Failed to retrieve tee times.');
             setConversationHistory(prev => [...prev, { role: 'ai', message: `Error: ${data.message || 'Failed to retrieve tee times.'}` }]);
+            // NEW: Handle redirect URL in case of API error
+            if (data.redirectUrl) {
+                setRedirectUrl(data.redirectUrl);
+            }
         }
         } catch (err) {
-        console.error('API call error:', err);
-        setError('An unexpected error occurred.');
-        setConversationHistory(prev => [...prev, { role: 'ai', message: `Error: An unexpected error occurred. ${(err as Error).message}` }]);
+        console.error('Error fetching tee times:', err);
+        setError('An unexpected error occurred while fetching tee times.');
+        setConversationHistory(prev => [...prev, { role: 'ai', message: `Unexpected error: ${(err as Error).message}` }]);
         } finally {
         setLoading(false);
         }
@@ -198,6 +218,13 @@ export default function CourseDetail() {
         </button>
 
         {error && <p style={{ color: 'red' }}>{error}</p>}
+        {redirectUrl && (
+            <p style={{ marginTop: '15px' }}>
+                <a href={redirectUrl} target="_blank" rel="noopener noreferrer">
+                    Continue Manually Here
+                </a>
+            </p>
+        )}
 
         {teeTimes.length > 0 && (
             <div>

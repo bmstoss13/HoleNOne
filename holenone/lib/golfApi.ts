@@ -77,12 +77,13 @@ const mockCourses: Course[] = [
         state: 'WI',
     },
     {
-        id: 'club-champion-orlando',
-        name: 'TPC Sawgrass',
+        id: 'mock-course-6',
+        name: 'Topgolf Austin',
         location: { lat: 30.1975, lng: -81.3937 },
-        type: 'semi-private',
-        city: 'Ponte Vedra Beach',
-        state: 'FL',
+        type: 'public',
+        city: 'Austin',
+        state: 'Tx',
+        website: 'https://www.fairfaxcounty.gov/parks/golf/burke-lake'
     },
     {
         id: 'mock-course-7',
