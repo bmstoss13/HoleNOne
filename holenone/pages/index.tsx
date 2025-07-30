@@ -5,9 +5,8 @@ import SearchBar from './components/SearchBar';
 import QuickAction from './components/QuickAction';
 import CourseList from './components/CourseList';
 import styles from './styling/index.module.css';
- // Adjust this path if getUserLocation is elsewhere
 
-// Re-declare interfaces if they're not globally available or imported
+// Re-declare interfaces, ensuring they match the backend interfaces for consistency
 interface Course {
     id: string;
     name: string;
@@ -15,19 +14,27 @@ interface Course {
     type: string;
     city: string;
     state: string;
+    rating?: number; // Optional, as it might be N/A
+    priceLevel?: number; // Optional, as it might be N/A
+    distance?: number; // Optional, as it might be N/A
+    website?: string;
 }
 
-interface ApiResponse {
-    courses: Course[];
+// The response structure from /api/search.ts
+interface SearchApiResponse {
+    topPick: string;
+    explanation: string;
+    courses: Course[]; // This will be the ranked courses
 }
-// Wherever getUserLocation is defined (if it's in index.tsx, then it's there)
 
-interface CustomCoordinates { // Define a simple interface for clarity
+interface CustomCoordinates {
     lat: number;
     lng: number;
 }
 
-const getUserLocation = (): Promise<CustomCoordinates> => { // <--- CHANGE THIS LINE
+// This function should ideally be in a shared utility file (e.g., lib/golfApi.ts)
+// but keeping it here for now as per your provided context.
+const getUserLocation = (): Promise<CustomCoordinates> => {
     return new Promise((resolve, reject) => {
         if (!navigator.geolocation) {
             reject(new Error("Geolocation is not supported by this browser."));
@@ -71,12 +78,18 @@ const getUserLocation = (): Promise<CustomCoordinates> => { // <--- CHANGE THIS 
 
 export default function Home() {
     const [searchResults, setSearchResults] = useState<Course[]>([]);
-    const [loadingCourses, setLoadingCourses] = useState(false); // Renamed to avoid conflict
+    const [loadingCourses, setLoadingCourses] = useState(false);
     
-    // New state for user location
     const [userCoordinates, setUserCoordinates] = useState<CustomCoordinates | null>(null);
-    const [loadingLocation, setLoadingLocation] = useState(true); // Initially loading location
+    const [loadingLocation, setLoadingLocation] = useState(true);
     const [locationError, setLocationError] = useState<string | null>(null);
+
+    const [quickActionDate, setQuickActionDate] = useState(new Date().toISOString().slice(0, 10));
+
+    // New states to store the LLM's top pick and explanation
+    const [topPick, setTopPick] = useState<string | null>(null);
+    const [explanation, setExplanation] = useState<string | null>(null);
+
 
     // --- EFFECT HOOK TO GET USER LOCATION ON COMPONENT MOUNT ---
     useEffect(() => {
@@ -85,8 +98,6 @@ export default function Home() {
             setLocationError(null);
             try {
                 const coords = await getUserLocation();
-                // GeolocationCoordinates object from navigator.geolocation
-                // has lat/lng under .coords property
                 setUserCoordinates(coords);
             } catch (err: any) {
                 console.error("Failed to get user location:", err);
@@ -97,35 +108,41 @@ export default function Home() {
         };
 
         fetchUserLocation();
-    }, []); // Empty dependency array means this runs once on mount
+    }, []);
 
+    // --- UPDATED handleSearch function to call /api/search ---
     const handleSearch = async (
         query: string,
         date: string,
         players: number,
-        // The location parameter from SearchBar can be used if it's dynamic
-        // Otherwise, we'll use userCoordinates if available
-        searchLocation?: CustomCoordinates
+        locationCoords?: CustomCoordinates,
+        timeOfDay?: string // This parameter is now passed to /api/search
     ) => {
-        // Use the passed searchLocation if available, otherwise fall back to userCoordinates
-        const locationToSend = searchLocation || userCoordinates;
+        setLoadingCourses(true);
+        setTopPick(null); // Clear previous LLM results
+        setExplanation(null);
+        setSearchResults([]); // Clear previous course results
 
-        if (!locationToSend) {
-            alert("Please allow location access or provide a location to search for courses.");
+        const finalCoordinates = locationCoords || userCoordinates;
+
+        if (!finalCoordinates) {
+            alert("Please provide a valid location or allow location access.");
+            setLoadingCourses(false);
             return;
         }
 
-        setLoadingCourses(true); // Indicate that courses are loading
         try {
-            const response = await fetch('/api/courses', {
+            // Call the new /api/search endpoint
+            const response = await fetch('/api/search', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     query,
                     date,
                     players,
-                    lat: locationToSend.lat,  // Pass latitude
-                    lng: locationToSend.lng  // Pass longitude
+                    lat: finalCoordinates.lat,
+                    lng: finalCoordinates.lng,
+                    timeOfDay // Pass timeOfDay to the search API
                 }),
             });
 
@@ -134,67 +151,77 @@ export default function Home() {
                 throw new Error(errorData.message || `API error: ${response.status}`);
             }
 
-            const data: ApiResponse = await response.json();
-            setSearchResults(data.courses);
+            // Parse the response from /api/search
+            const data: SearchApiResponse = await response.json();
+
+            setTopPick(data.topPick);
+            setExplanation(data.explanation);
+            setSearchResults(data.courses); // These are already ranked by the LLM
 
         } catch (err: any) {
-            console.error("Error fetching courses:", err.message);
-            setSearchResults([]); // Clear results on error
+            console.error("Error fetching search results:", err.message);
+            setSearchResults([]);
+            setTopPick(null);
+            setExplanation(null);
         } finally {
-            setLoadingCourses(false); // Courses loading finished
+            setLoadingCourses(false);
         }
     };
 
     return (
         <div className={styles['home-page-container']}>
             <div className={styles['home-page-header']}>
-                <h1>Hole 'N One</h1>
-                <p>Book your tee in no time.</p>
+                {/* <h1>Hole 'N One</h1>
+                <p>Book your tee in no time.</p> */}
             </div>
 
             {loadingLocation && <p>Loading your current location...</p>}
             {locationError && <p style={{ color: 'red' }}>Location Error: {locationError}</p>}
             
-            {/* Render SearchBar and QuickActions only after location is loaded or if there's an error */}
             {!loadingLocation && (
                 <>
-                    {/* SearchBar needs to be updated to pass userCoordinates or allow manual input */}
-                    {/* For now, assuming SearchBar's onSearch can receive a location directly or implicitly uses userCoordinates */}
                     <SearchBar onSearch={handleSearch} /> 
 
+                    {/* Quick Actions - always visible */}
                     <div className="quick-actions">
-                        {/* Now pass userCoordinates to QuickAction clicks */}
                         <QuickAction 
                             text="Morning Tee Times" 
-                            onClick={() => handleSearch('morning', '', 1, userCoordinates || undefined)} 
+                            onClick={() => handleSearch('morning', quickActionDate, 1, userCoordinates || undefined, "Morning")} 
                         />
                         <QuickAction 
                             text="Affordable Rounds" 
-                            onClick={() => handleSearch('budget friendly', '', 1, userCoordinates || undefined)} 
+                            onClick={() => handleSearch('budget friendly', quickActionDate, 1, userCoordinates || undefined, "Any")} 
                         />
                         <QuickAction 
                             text="Championship Courses" 
-                            onClick={() => handleSearch('championship', '', 1, userCoordinates || undefined)} 
+                            onClick={() => handleSearch('championship', quickActionDate, 1, userCoordinates || undefined, "Any")} 
                         />
                         <QuickAction 
                             text="Beginner Friendly" 
-                            onClick={() => handleSearch('beginner', '', 1, userCoordinates || undefined)} 
+                            onClick={() => handleSearch('beginner', quickActionDate, 1, userCoordinates || undefined, "Any")} 
                         />
                     </div>
+
+                    {loadingCourses ? (
+                        <p>Finding courses and generating recommendations...</p>
+                    ) : (
+                        <>
+                            {topPick && explanation && (
+                                <div className={styles['llm-recommendation']}>
+                                    <h2>Top Pick: {topPick}</h2>
+                                    <p>{explanation}</p>
+                                </div>
+                            )}
+
+                            {searchResults.length > 0 ? (
+                                <CourseList courses={searchResults} />
+                            ) : (
+                                <p>No courses found. Try a different search!</p>
+                            )}
+                        </>
+                    )}
                 </>
             )}
-
-
-            {loadingCourses && <p>Loading nearby courses...</p>}
-            
-            {!loadingCourses && searchResults.length === 0 && userCoordinates && !locationError && (
-                <p>No courses found near your location. Try a different search!</p>
-            )}
-            {!loadingCourses && searchResults.length === 0 && !userCoordinates && !locationError && (
-                <p>Allow location access to find nearby courses.</p>
-            )}
-
-            <CourseList courses={searchResults} />
         </div>
     );
 }

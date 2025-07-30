@@ -6,6 +6,11 @@ export interface Course {
     city: string;
     state: string;
     website?: string; // Important for the AI agent
+    rating: number;
+    distance: number;
+    priceLevel: number;
+    image: string;
+    
 }
 
 // Make sure these are EXPORTED
@@ -24,4 +29,9 @@ export interface BookingResponse {
     time: string;
     players: number;
     status: string;
+}
+
+export interface CustomCoordinates {
+    lat: number;
+    lng: number;
 }
