@@ -20,6 +20,9 @@ interface Course {
     city: string;
     state: string;
     website?: string;
+    distance?: string;
+    rating?: string;
+    priceLevel?: string;
 }
 
 interface TeeTime {
@@ -43,6 +46,7 @@ const mockCourses: Course[] = [
         type: 'public',
         city: 'Pebble Beach',
         state: 'CA',
+        distance: '5 miles'
     },
     {
         id: 'mock-course-2',
@@ -51,6 +55,7 @@ const mockCourses: Course[] = [
         type: 'private',
         city: 'Augusta',
         state: 'GA',
+        distance: '5 miles'
     },
     {
         id: 'mock-course-3',
@@ -59,6 +64,7 @@ const mockCourses: Course[] = [
         type: 'public',
         city: 'St Andrews',
         state: 'SCT',
+        distance: '5 miles'
     },
     {
         id: 'mock-course-4',
@@ -67,6 +73,7 @@ const mockCourses: Course[] = [
         type: 'public',
         city: 'La Jolla',
         state: 'CA',
+        distance: '5 miles'
     },
     {
         id: 'mock-course-5',
@@ -75,6 +82,7 @@ const mockCourses: Course[] = [
         type: 'private',
         city: 'Sheboygan',
         state: 'WI',
+        distance: '5 miles'
     },
     {
         id: 'mock-course-6',
@@ -83,7 +91,8 @@ const mockCourses: Course[] = [
         type: 'public',
         city: 'Austin',
         state: 'Tx',
-        website: 'https://www.fairfaxcounty.gov/parks/golf/burke-lake'
+        website: 'https://www.fairfaxcounty.gov/parks/golf/burke-lake',
+        distance: '5 miles'
     },
     {
         id: 'mock-course-7',
@@ -92,6 +101,7 @@ const mockCourses: Course[] = [
         type: 'public',
         city: 'Farmingdale',
         state: 'NY',
+        distance: '5 miles'
     },
     {
         id: 'mock-course-8',
@@ -100,6 +110,7 @@ const mockCourses: Course[] = [
         type: 'public',
         city: 'Pinehurst',
         state: 'NC',
+        distance: '5 miles'
     },
 ];
 
@@ -183,6 +194,7 @@ export const getNearbyCoursesReal = async (lat: number, lng: number): Promise<Co
         const courses: Course[] = await Promise.all(
             filteredResults.map(async (place: any) => {
                 const { city, state } = await getPlaceDetails(place.place_id);
+                const distance = getDistanceFromLatLonInKm(lat, lng, place.geometry.location.lat, place.geometry.location.lng);
                 return {
                     id: place.place_id,
                     name: place.name,
@@ -193,6 +205,9 @@ export const getNearbyCoursesReal = async (lat: number, lng: number): Promise<Co
                     type: 'public', // defaulting to public for now
                     city,
                     state,
+                    distance,
+                    rating: place.rating,
+                    priceLevel: place.price_level,
                 };
             })
         );
@@ -237,6 +252,49 @@ export const getPlaceDetails = async (placeId: string): Promise<{ city: string; 
     }
 };
 
+export const getUserLocation = (): Promise<{ lat: number; lng: number }> => {
+    return new Promise((resolve, reject) => {
+        if (!navigator.geolocation) {
+            reject(new Error("Geolocation is not supported by this browser."));
+            return; // Important: exit after rejecting
+        }
+
+        navigator.geolocation.getCurrentPosition(
+            position => {
+                resolve({
+                    lat: position.coords.latitude,
+                    lng: position.coords.longitude,
+                });
+            },
+            error => {
+                let errorMessage = "Failed to retrieve user location.";
+                switch (error.code) {
+                    case error.PERMISSION_DENIED:
+                        errorMessage = "Geolocation permission denied by the user.";
+                        break;
+                    case error.POSITION_UNAVAILABLE:
+                        errorMessage = "Location information is unavailable.";
+                        break;
+                    case error.TIMEOUT:
+                        errorMessage = "The request to get user location timed out.";
+                        break;
+                    default:
+                        errorMessage = "An unknown geolocation error occurred.";
+                        break;
+                }
+                console.error("Geolocation Error:", errorMessage, error);
+                reject(new Error(errorMessage));
+            },
+            {
+                enableHighAccuracy: true, // Request the best possible results
+                timeout: 10000,          // Wait up to 10 seconds for a position
+                maximumAge: 0            // Do not use a cached position
+            }
+        );
+    });
+};
+
+
 export const getCourseDetails = async (courseId: string): Promise<Course | null> => {
     if (USE_MOCK_DATA) {
         return mockCourses.find(course => course.id === courseId) || null;
@@ -255,6 +313,7 @@ export const getCourseDetails = async (courseId: string): Promise<Course | null>
                     city,
                     state,
                     website: result.website
+
                 }
             }
             return null;
@@ -295,3 +354,19 @@ export const getBookingRules = async (courseId: string) => {
         isPublic: true,
     };
 };
+
+function getDistanceFromLatLonInKm(lat1: number, lon1: number, lat2: number, lon2: number) {
+    const R = 6371; // Radius of the earth in km
+    const dLat = deg2rad(lat2 - lat1);
+    const dLon = deg2rad(lon2 - lon1);
+    const a =
+        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+        Math.cos(deg2rad(lat1)) * Math.cos(deg2rad(lat2)) *
+        Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c;
+}
+
+function deg2rad(deg: number) {
+    return deg * (Math.PI / 180);
+}

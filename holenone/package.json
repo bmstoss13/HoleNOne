@@ -9,6 +9,8 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@fortawesome/free-solid-svg-icons": "^7.0.0",
+    "@fortawesome/react-fontawesome": "^0.2.3",
     "@google/generative-ai": "^0.24.1",
     "axios": "^1.11.0",
     "date-fns": "^4.1.0",
