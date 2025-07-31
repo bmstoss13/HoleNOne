@@ -1,17 +1,17 @@
-// components/CourseCard.tsx (or wherever your CourseCard is defined)
+// components/CourseCard.tsx
 
-import Link from "next/link";
-// Make sure this path is correct for your shared types
-import { Course } from "@/types/golf"; // Ensure this imports your updated Course interface
+import Link from "next/link"; 
+import { Course } from "@/types/golf"; 
 
-interface CourseCardProps { // Renamed from 'Props' to be more specific
-    course: Course; // Use the imported Course interface
+interface CourseCardProps {
+    course: Course;
+    isTopPick?: boolean; // New optional prop to indicate if it's the top pick
 }
 
 // Helper function to format priceLevel
 const formatPriceLevel = (priceLevel?: number): string => {
     if (priceLevel === undefined || priceLevel === null) {
-        return 'N/A'; // Or whatever you prefer for missing price info
+        return '$$';
     }
     switch (priceLevel) {
         case 0: return 'Free';
@@ -19,28 +19,45 @@ const formatPriceLevel = (priceLevel?: number): string => {
         case 2: return '$$';
         case 3: return '$$$';
         case 4: return '$$$$';
-        default: return 'N/A'; // For any unexpected value
+        default: return '$$'; // Changed default to N/A for consistency
     }
 };
 
-export const CourseCard = ({ course }: CourseCardProps) => ( // Use the new interface name
-    <div className="course-card">
-        {course.image && <img src={course.image} alt={`${course.name} image`} />}
-        <h3>{course.name}</h3>
-        {/* Use optional chaining and nullish coalescing for rating */}
-        <p>Rating: {course.rating?.toFixed(1) ?? "N/A"}</p>
-        {/* Use optional chaining for distance */}
-        <p>Distance: {course.distance?.toFixed(1)} miles</p>
-        {/* Use the new formatPriceLevel function */}
-        <p>Price: {formatPriceLevel(course.priceLevel)}</p>
-
-        {/* ... (Book Button fix will go here) ... */}
-        {course.website ? ( // Check if website exists before rendering the link
-            <a href={course.website} target="_blank" rel="noopener noreferrer">
-                Book Now
-            </a>
+export const CourseCard = ({ course, isTopPick }: CourseCardProps) => (
+    // Conditionally add the 'is-top-pick' class based on the prop
+    <div className={`course-card ${isTopPick ? 'is-top-pick' : ''}`}> 
+        {/* Image tag with fixed size styling applied via CSS and an onError fallback */}
+        {course.image ? (
+            <img 
+                src={course.image} 
+                alt={`${course.name} image`} 
+                // Fallback to a placeholder image if the actual image fails to load
+                onError={(e) => { 
+                    e.currentTarget.src = `https://placehold.co/400x200/cccccc/000000?text=${encodeURIComponent(course.name)}`; 
+                    e.currentTarget.onerror = null; // Prevent infinite loop if placeholder also fails
+                }}
+            />
         ) : (
-            // Optional: Display a message if no website is available
+            // Display a generic placeholder if no image URL is provided
+            <img 
+                src={`https://placehold.co/400x200/cccccc/000000?text=${encodeURIComponent(course.name)}+Image`} 
+                alt={`${course.name} placeholder image`} 
+            />
+        )}
+        
+        <h3>{course.name}</h3>
+        <p>Rating: {course.rating?.toFixed(1) ?? "N/A"}</p>
+        <p>Distance: {course.distance?.toFixed(1)} miles</p>
+        <p>Price Level: {formatPriceLevel(course.priceLevel)}</p>
+
+        {course.website ? (
+            <button 
+                onClick={() => window.open(course.website, '_blank', 'noopener noreferrer')}
+                className="book-now-button" 
+            >
+                Book Now
+            </button>
+        ) : (
             <p className="no-website-msg">Website not available</p>
         )}
     </div>

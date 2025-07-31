@@ -1,10 +1,17 @@
-import type { NextApiRequest, NextApiResponse } from 'next';
-import axios from 'axios'; // You might need to install axios if you haven't: npm install axios
+// pages/api/geocode.ts
 
-export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-    console.log('----- Geocode API route hit! -----');
-    // Only allow GET requests for geocoding to keep it simple,
-    // as it's typically a query operation.
+import type { NextApiRequest, NextApiResponse } from 'next';
+import axios from 'axios';
+
+interface GeocodeResponse {
+    lat: number;
+    lng: number;
+}
+
+export default async function handler(
+    req: NextApiRequest,
+    res: NextApiResponse<GeocodeResponse | { message: string }>
+) {
     if (req.method !== 'GET') {
         return res.status(405).json({ message: 'Method Not Allowed' });
     }
@@ -12,35 +19,35 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const { address } = req.query;
 
     if (!address || typeof address !== 'string') {
-        return res.status(400).json({ error: 'Address query parameter is required.' });
+        return res.status(400).json({ message: 'Missing or invalid address parameter.' });
     }
 
-    // Access the API key securely from server-side environment variables
-    const GOOGLE_API_KEY = process.env.GOOGLE_MAPS_API_KEY;
+    const apiKey = process.env.GOOGLE_MAPS_API_KEY;
 
-    if (!GOOGLE_API_KEY) {
-        console.error('Maps_API_KEY is not set in environment variables.');
-        return res.status(500).json({ error: 'Server configuration error: API key missing.' });
+    if (!apiKey) {
+        console.error('GOOGLE_MAPS_API_KEY is not set in environment variables.');
+        return res.status(500).json({ message: 'Server configuration error: Google Maps API key missing.' });
     }
 
-    const geocodingUrl = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(address)}&key=${GOOGLE_API_KEY}`;
+    const url = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(address)}&key=${apiKey}`;
 
     try {
-        const response = await axios.get(geocodingUrl);
+        const response = await axios.get(url);
         const data = response.data;
 
         if (data.status === 'OK' && data.results.length > 0) {
-            // Return only the necessary location data (lat/lng) to the frontend
             const location = data.results[0].geometry.location;
-            return res.status(200).json(location); // { lat: number, lng: number }
-        } else if (data.status === 'ZERO_RESULTS') {
-            return res.status(404).json({ error: 'No results found for the given address.' });
+            return res.status(200).json({ lat: location.lat, lng: location.lng });
         } else {
-            console.error('Google Geocoding API error:', data.status, data.error_message);
-            return res.status(500).json({ error: data.error_message || 'Error geocoding address.' });
+            console.warn(`Geocoding failed for address: "${address}". Status: ${data.status}`);
+            return res.status(404).json({ message: `Could not geocode address: ${data.status}` });
         }
     } catch (error: any) {
-        console.error('Backend geocoding request failed:', error.message || error);
-        return res.status(500).json({ error: 'Failed to geocode address on the server.' });
+        console.error('Error in geocoding API:', error);
+        if (axios.isAxiosError(error) && error.response) {
+            console.error('Geocoding API response error:', error.response.data);
+            return res.status(error.response.status).json({ message: error.response.data.error_message || 'External geocoding service error.' });
+        }
+        res.status(500).json({ message: 'Internal Server Error during geocoding.' });
     }
 }

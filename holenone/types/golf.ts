@@ -1,3 +1,5 @@
+// types/golf.ts
+
 export interface Course {
     id: string;
     name: string;
@@ -5,33 +7,28 @@ export interface Course {
     type: string;
     city: string;
     state: string;
-    website?: string; // Important for the AI agent
-    rating: number;
-    distance: number;
-    priceLevel: number;
-    image: string;
-    
+    website?: string;
+    distance?: number;
+    rating?: number;
+    priceLevel?: number;
+    photo?: string; // Existing photo property for raw Google Places photo URL
+    image?: string; // <--- ADDED: Optional image property for display in CourseCard
 }
 
-// Make sure these are EXPORTED
+export interface CustomCoordinates {
+    lat: number;
+    lng: number;
+}
+
 export interface TeeTime {
     time: string;
-    availableSlots: number;
-    // Potentially add more fields that the WebAgent might extract
-    price?: string;
-    bookingUrl?: string; // If a direct booking link is found
+    availableSpots: number;
 }
 
-// You might also have other types from golfApi.ts that you want to share
 export interface BookingResponse {
     bookingId: string;
     courseId: string;
     time: string;
     players: number;
     status: string;
-}
-
-export interface CustomCoordinates {
-    lat: number;
-    lng: number;
 }

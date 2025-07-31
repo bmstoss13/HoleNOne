@@ -1,128 +1,70 @@
 // lib/golfApi.ts
 
 import axios from 'axios';
-import dotenv from 'dotenv';
-import { CustomCoordinates } from '@/types/golf';
-dotenv.config();
+// Import Course, TeeTime, BookingResponse from '@/types/golf'
+import { Course, TeeTime, BookingResponse } from '@/types/golf'; 
 
 const GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_API_KEY;
-if (!GOOGLE_MAPS_API_KEY) {
-    throw new Error('Google Maps API key incorrectly configured or missing.');
+
+if (typeof window === 'undefined' && !GOOGLE_MAPS_API_KEY) {
+    throw new Error('Google Maps API key incorrectly configured or missing on the server.');
 }
 
-const USE_MOCK_DATA = false;
+const USE_MOCK_DATA = false; // Set to true to use mock data during development
 
-// Types
-interface Course {
-    id: string;
-    name: string;
-    location: { lat: number; lng: number };
-    type: string;
-    city: string;
-    state: string;
-    website?: string;
-    distance?: number;
-    rating?: number;
-    price?: number;
+// New type for API responses that include pagination tokens
+export interface CoursesApiResponse {
+    courses: Course[];
+    nextPageToken?: string; // For Google Places API pagination
+    nextOffset?: number; // For mock data pagination
 }
 
-interface TeeTime {
-    time: string;
-    availableSpots: number;
+// CustomCoordinates EXPORTED LOCALLY from golfApi.ts as per your request
+export interface CustomCoordinates { 
+    lat: number;
+    lng: number;
 }
 
-interface BookingResponse {
-    bookingId: string;
-    courseId: string;
-    time: string;
-    players: number;
-    status: string;
+// --- Helper Functions ---
+function deg2rad(deg: number) {
+    return deg * (Math.PI / 180);
 }
 
+function getDistanceFromLatLonInKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
+    const R = 6371; // Radius of Earth in kilometers
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLon = (lon2 - lon1) * Math.PI / 180;
+    const a =
+        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+        Math.cos(deg2rad(lat1)) * Math.cos(deg2rad(lat2)) *
+        Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c; // Distance in kilometers
+}
+
+function kmToMiles(km: number): number {
+    return km * 0.621371;
+}
+
+function milesToMeters(miles: number): number {
+    return miles * 1609.34;
+}
+
+// --- Mock Data ---
 const mockCourses: Course[] = [
-    { id: 'mantua-local-links', name: 'Mantua Green Golf Course', location: { lat: 38.8700, lng: -77.2700 }, type: 'public', city: 'Fairfax', state: 'VA', distance: 1.1, price: 50},
-    { id: 'fairfax-park', name: 'Fairfax Park Golf', location: { lat: 38.8472, lng: -77.3069 }, type: 'public', city: 'Fairfax', state: 'VA', distance: 2.7, price: 40 }, // Near Burke Lake
-    { id: 'oakton-country-club', name: 'Oakton Country Club', location: { lat: 38.9050, lng: -77.3050 }, type: 'private', city: 'Oakton', state: 'VA', distance: 1.8 },
-    { id: 'potomac-ridge', name: 'Potomac Ridge Golf Course', location: { lat: 38.9200, lng: -77.4000 }, type: 'public', city: 'Reston', state: 'VA', distance: 50 },
-    { id: 'gaineville-links', name: 'Gainesville Golf Center', location: { lat: 38.8150, lng: -77.5300 }, type: 'public', city: 'Gainesville', state: 'VA', distance: 10 },
-    // Keep some of your original mock courses but update their distance to a number
-    { id: 'mock-course-1', name: 'Pebble Beach Golf Links', location: { lat: 36.5681, lng: -121.9486 }, type: 'public', city: 'Pebble Beach', state: 'CA', distance: 2500 }, // Example large distance
-    { id: 'mock-course-2', name: 'Augusta National Golf Club', location: { lat: 33.5030, lng: -82.0199 }, type: 'private', city: 'Augusta', state: 'GA', distance: 600 },
-    {
-        
-        id: 'mock-course-1',
-        name: 'Pebble Beach Golf Links',
-        location: { lat: 36.5681, lng: -121.9486 },
-        type: 'public',
-        city: 'Pebble Beach',
-        state: 'CA',
-        distance: 5
-    },
-    {
-        id: 'mock-course-2',
-        name: 'Augusta National Golf Club',
-        location: { lat: 33.5030, lng: -82.0199 },
-        type: 'private',
-        city: 'Augusta',
-        state: 'GA',
-        distance: 5
-    },
-    {
-        id: 'mock-course-3',
-        name: 'St. Andrews Links',
-        location: { lat: 56.3490, lng: -2.8007 },
-        type: 'public',
-        city: 'St Andrews',
-        state: 'SCT',
-        distance: 5
-    },
-    {
-        id: 'mock-course-4',
-        name: 'Torrey Pines Golf Course',
-        location: { lat: 32.8946, lng: -117.2516 },
-        type: 'public',
-        city: 'La Jolla',
-        state: 'CA',
-        distance: 5
-    },
-    {
-        id: 'mock-course-5',
-        name: 'Whistling Straits',
-        location: { lat: 43.6374, lng: -87.7367 },
-        type: 'private',
-        city: 'Sheboygan',
-        state: 'WI',
-        distance: 5
-    },
-    {
-        id: 'mock-course-6',
-        name: 'Topgolf Austin',
-        location: { lat: 30.1975, lng: -81.3937 },
-        type: 'public',
-        city: 'Austin',
-        state: 'Tx',
-        website: 'https://www.fairfaxcounty.gov/parks/golf/burke-lake',
-        distance: 5
-    },
-    {
-        id: 'mock-course-7',
-        name: 'Bethpage Black',
-        location: { lat: 40.7452, lng: -73.4618 },
-        type: 'public',
-        city: 'Farmingdale',
-        state: 'NY',
-        distance: 5
-    },
-    {
-        id: 'mock-course-8',
-        name: 'Pinehurst No. 2',
-        location: { lat: 35.1954, lng: -79.4662 },
-        type: 'public',
-        city: 'Pinehurst',
-        state: 'NC',
-        distance: 5
-    },
+    { id: 'mantua-local-links', name: 'Mantua Green Golf Course', location: { lat: 38.8700, lng: -77.2700 }, type: 'public', city: 'Fairfax', state: 'VA', distance: 1.1, priceLevel: 1, image: 'https://placehold.co/400x200/007bff/ffffff?text=Mantua+Golf' },
+    { id: 'fairfax-park', name: 'Fairfax Park Golf', location: { lat: 38.8472, lng: -77.3069 }, type: 'public', city: 'Fairfax', state: 'VA', distance: 2.7, priceLevel: 1, image: 'https://placehold.co/400x200/28a745/ffffff?text=Fairfax+Golf' },
+    { id: 'oakton-country-club', name: 'Oakton Country Club', location: { lat: 38.9050, lng: -77.3050 }, type: 'private', city: 'Oakton', state: 'VA', distance: 1.8, priceLevel: 2, image: 'https://placehold.co/400x200/ffc107/000000?text=Oakton+CC' },
+    { id: 'potomac-ridge', name: 'Potomac Ridge Golf Course', location: { lat: 38.9200, lng: -77.4000 }, type: 'public', city: 'Reston', state: 'VA', distance: 8.0, priceLevel: 2, image: 'https://placehold.co/400x200/17a2b8/ffffff?text=Potomac+Ridge' },
+    { id: 'gaineville-links', name: 'Gainesville Golf Center', location: { lat: 38.8150, lng: -77.5300 }, type: 'public', city: 'Gainesville', state: 'VA', distance: 20.0, priceLevel: 1, image: 'https://placehold.co/400x200/6f42c1/ffffff?text=Gainesville+Golf' },
+    { id: 'mock-course-1', name: 'Pebble Beach Golf Links', location: { lat: 36.5681, lng: -121.9486 }, type: 'public', city: 'Pebble Beach', state: 'CA', distance: 2500, priceLevel: 4, image: 'https://placehold.co/400x200/dc3545/ffffff?text=Pebble+Beach' },
+    { id: 'mock-course-2', name: 'Augusta National Golf Club', location: { lat: 33.5030, lng: -82.0199 }, type: 'private', city: 'Augusta', state: 'GA', distance: 600, priceLevel: 4, image: 'https://placehold.co/400x200/fd7e14/ffffff?text=Augusta+National' },
+    { id: 'mock-course-3', name: 'Pinehurst Resort', location: { lat: 35.1972, lng: -79.4792 }, type: 'public', city: 'Pinehurst', state: 'NC', distance: 300, priceLevel: 3, image: 'https://placehold.co/400x200/4CAF50/ffffff?text=Pinehurst' },
+    { id: 'mock-course-4', name: 'Bandon Dunes Golf Resort', location: { lat: 43.1972, lng: -124.3892 }, type: 'public', city: 'Bandon', state: 'OR', distance: 2800, priceLevel: 4, image: 'https://placehold.co/400x200/FF5722/ffffff?text=Bandon+Dunes' },
+    { id: 'mock-course-5', name: 'Whistling Straits', location: { lat: 43.7650, lng: -87.7750 }, type: 'public', city: 'Sheboygan', state: 'WI', distance: 700, priceLevel: 4, image: 'https://placehold.co/400x200/607D8B/ffffff?text=Whistling+Straits' },
+    { id: 'mock-course-6', name: 'Erin Hills Golf Course', location: { lat: 43.2750, lng: -88.3750 }, type: 'public', city: 'Erin', state: 'WI', distance: 700, priceLevel: 3, image: 'https://placehold.co/400x200/795548/ffffff?text=Erin+Hills' },
 ];
+
 
 const mockTeeTimes = [
     {
@@ -160,94 +102,140 @@ const mockTeeTimes = [
     }
 ];
 
-export const getNearbyCoursesMock = async (lat: number, lng: number, radiusMiles: number = 25): Promise<Course[]> => {
-    await new Promise(resolve => setTimeout(resolve, 500)); // Simulate API delay
 
+// --- Main Functions ---
+
+export const getNearbyCoursesMock = async (
+    lat: number, 
+    lng: number, 
+    radiusMiles: number = 25, 
+    offset: number = 0, 
+    limit: number = 4 
+): Promise<CoursesApiResponse> => {
+    await new Promise(resolve => setTimeout(resolve, 500));
+    
     const nearbyCourses: Course[] = [];
     for (const course of mockCourses) {
-        const distanceKm = getDistanceFromLatLonInKm(lat, lng, course.location.lat, course.location.lng);
-        const distanceMiles = kmToMiles(distanceKm);
+        const actualDistanceKm = getDistanceFromLatLonInKm(lat, lng, course.location.lat, course.location.lng);
+        const actualDistanceMiles = kmToMiles(actualDistanceKm);
 
-        if (distanceMiles <= radiusMiles) {
-            nearbyCourses.push({ ...course, distance: parseFloat(distanceMiles.toFixed(1)) }); // Add distance, formatted
+        if (actualDistanceMiles <= radiusMiles) {
+            nearbyCourses.push({
+                ...course,
+                distance: course.distance !== undefined ? course.distance : parseFloat(actualDistanceMiles.toFixed(1))
+            });
         }
     }
     
-    // If no nearby courses found, return a few random ones for development or handle as desired
-    if (nearbyCourses.length === 0) {
-        // Return some courses regardless for dev, but mark their distance as beyond radius
-        console.warn(`No mock courses found within ${radiusMiles} miles. Returning some distant ones.`);
-        return mockCourses.slice(0, 4).map(course => ({
+    nearbyCourses.sort((a, b) => (a.distance || 0) - (b.distance || 0));
+
+    const paginatedCourses = nearbyCourses.slice(offset, offset + limit);
+    const nextOffset = offset + limit < nearbyCourses.length ? offset + limit : undefined;
+
+    if (paginatedCourses.length === 0 && offset === 0) {
+        console.warn(`No mock courses found within ${radiusMiles} miles of ${lat},${lng}. Returning some distant ones.`);
+        const fallbackCourses = mockCourses.slice(0, limit).map(course => ({
             ...course,
             distance: parseFloat(kmToMiles(getDistanceFromLatLonInKm(lat, lng, course.location.lat, course.location.lng)).toFixed(1))
         }));
+        return { courses: fallbackCourses, nextOffset: limit < mockCourses.length ? limit : undefined };
     }
     
-    return nearbyCourses;
+    return { courses: paginatedCourses, nextOffset };
 };
 
 
-
-export const getNearbyCoursesReal = async (lat: number, lng: number, radiusMiles: number = 25): Promise<Course[]> => {
-    const radiusMeters = Math.min(milesToMeters(radiusMiles), 50000); // Max radius for Nearby Search is 50,000 meters
-
-    // New Places API Endpoint
+export const getNearbyCoursesReal = async (
+    lat: number, 
+    lng: number, 
+    radiusMiles: number = 25, 
+    apiKey: string,
+    pageToken?: string 
+): Promise<CoursesApiResponse> => {
+    const radiusMeters = Math.min(milesToMeters(radiusMiles), 50000); 
     const url = `https://places.googleapis.com/v1/places:searchNearby`;
+
+    const fieldsToRequest = [
+        'places.id',
+        'places.displayName',
+        'places.location',
+        'places.rating',
+        'places.priceLevel',
+        'places.websiteUri',
+        'places.types',
+        'places.photos', 
+    ].join(',');
+
+    const requestBody: any = {
+        locationRestriction: {
+            circle: {
+                center: { latitude: lat, longitude: lng },
+                radius: radiusMeters,
+            },
+        },
+        includedTypes: ['golf_course'],
+        rankPreference: 'DISTANCE',
+        // pageSize: 4, // REMOVED: This parameter is not supported by Places API (New) searchNearby
+    };
+
+    if (pageToken) {
+        requestBody.pageToken = pageToken; 
+    }
 
     try {
         const response = await axios.post(
             url,
-            {
-                // Request Body for the New Places API searchNearby
-                locationRestriction: {
-                    circle: {
-                        center: { latitude: lat, longitude: lng },
-                        radius: radiusMeters,
-                    },
-                },
-                includedTypes: ['golf_course'], // Specific type for golf courses
-                rankPreference: 'DISTANCE', // Rank by distance (or 'POPULARITY' if preferred)
-                // --- CRUCIAL: fieldMask to request specific fields ---
-                // websiteUri is the new field name for website
-                // priceLevel should still be priceLevel or check new docs for exact name
-                // rating and displayName are common
-                //fieldMask: 'places.displayName,places.location,places.rating,places.priceLevel,places.websiteUri,places.id,places.types',
-            },
+            requestBody,
             {
                 headers: {
                     'Content-Type': 'application/json',
-                    'X-Goog-Api-Key': GOOGLE_MAPS_API_KEY,
-                    'X-Goog-FieldMask': 'places.displayName,places.location,places.rating,places.priceLevel,places.websiteUri,places.id,places.types', // Redundant but often included
+                    'X-Goog-Api-Key': apiKey,
+                    'X-Goog-FieldMask': fieldsToRequest,
                 },
             }
         );
 
-        const places = response.data.places; // The actual list of places is now under 'places'
+        // Do NOT explicitly slice to limit to 4 results here.
+        // The Places API (New) will return a default number of results per page (e.g., up to 20).
+        // The AI will then select the top 4 from this list.
+        const places = response.data.places; 
+        const newPageToken = response.data.nextPageToken; 
 
         if (!places || places.length === 0) {
-            return [];
+            return { courses: [], nextPageToken: newPageToken };
         }
 
         const courses: Course[] = await Promise.all(
             places.map(async (place: any) => {
-                // The structure of the 'place' object is different in the new API
-                // For example, name is now displayName, location has latitude/longitude directly
-                const courseName = place.displayName?.text;
                 const courseId = place.id;
+                const courseName = place.displayName?.text;
                 const courseLat = place.location?.latitude;
                 const courseLng = place.location?.longitude;
                 const courseRating = place.rating;
-                const coursePriceLevel = place.priceLevel; // Should be here if requested and available
-                const courseWebsite = place.websiteUri; // Should be here if requested and available
+                const coursePriceLevel = place.priceLevel;
+                const courseWebsite = place.websiteUri;
                 const courseTypes = place.types || [];
+                
+                const photoReferenceName = place.photos?.[0]?.name;
+                const imageUrl = photoReferenceName ? `https://places.googleapis.com/v1/${photoReferenceName}/media?key=${apiKey}&maxWidthPx=400` : undefined;
 
-                // You might still need getPlaceDetails for city/state if not directly in searchNearby response
-                // or if you want to use address_components from Place Details.
-                // However, for website and priceLevel, they should be here now.
-                const { city, state } = await getPlaceDetails(courseId); // Still assuming getPlaceDetails uses the old API or is adapted.
+
+                let city = 'N/A';
+                let state = 'N/A';
+                if (courseId) {
+                    try {
+                        const placeDetails = await getPlaceDetails(courseId, apiKey);
+                        if (placeDetails) {
+                            city = placeDetails.city || city;
+                            state = placeDetails.state || state;
+                        }
+                    } catch (detailError) {
+                        console.warn(`Could not fetch details for ${courseName} (ID: ${courseId}):`, detailError);
+                    }
+                }
 
                 const distanceKm = getDistanceFromLatLonInKm(lat, lng, courseLat, courseLng);
-                const distanceMiles = kmToMiles(distanceKm);
+                const distanceMiles = parseFloat(kmToMiles(distanceKm).toFixed(1));
 
                 return {
                     id: courseId,
@@ -256,40 +244,56 @@ export const getNearbyCoursesReal = async (lat: number, lng: number, radiusMiles
                         lat: courseLat,
                         lng: courseLng,
                     },
-                    type: courseTypes.includes('public_golf_course') ? 'public' : 'private', // Example type mapping
-                    city, // From getPlaceDetails
-                    state, // From getPlaceDetails
-                    distance: parseFloat(distanceMiles.toFixed(1)),
+                    type: courseTypes.includes('golf_course') ? 'public' : 'public',
+                    city,
+                    state,
+                    distance: distanceMiles,
                     rating: courseRating,
                     priceLevel: coursePriceLevel,
                     website: courseWebsite,
-                    image: undefined // Assuming images are not in nearby search or not yet implemented
+                    photo: imageUrl, 
+                    image: imageUrl, 
                 };
             })
         );
 
-        return courses;
-    } catch (error) {
+        return { courses, nextPageToken: newPageToken };
+    } catch (error: any) {
         console.error('Error fetching nearby golf courses with New Places API:', error);
-        return [];
-    }
-};
-export const getNearbyCourses = async (lat: number, lng: number): Promise<Course[]> => {
-    if (USE_MOCK_DATA) {
-        console.log('Using mock data for development');
-        return getNearbyCoursesMock(lat, lng);
-    } else {
-        console.log('Using real Google Maps API');
-        return getNearbyCoursesReal(lat, lng);
+        if (error.response) {
+            console.error('Response data:', error.response.data);
+            console.error('Response status:', error.response.status);
+            console.error('Response headers:', error.response.headers);
+        }
+        throw error;
     }
 };
 
-export const getPlaceDetails = async (placeId: string): Promise<{ city: string; state: string }> => {
-    const url = `https://maps.googleapis.com/maps/api/place/details/json?place_id=${placeId}&fields=address_components&key=${GOOGLE_MAPS_API_KEY}`;
+export const getNearbyCourses = async (
+    lat: number, 
+    lng: number, 
+    radiusMiles: number = 25, 
+    apiKey: string,
+    pageToken?: string, 
+    offset?: number 
+): Promise<CoursesApiResponse> => {
+    if (USE_MOCK_DATA) {
+        console.log('Using mock data for development');
+        return getNearbyCoursesMock(lat, lng, radiusMiles, offset); 
+    } else {
+        console.log('Using real Google Maps API');
+        return getNearbyCoursesReal(lat, lng, radiusMiles, apiKey, pageToken); 
+    }
+};
+
+
+export const getPlaceDetails = async (placeId: string, apiKey: string): Promise<{ city: string; state: string }> => {
+    const url = `https://maps.googleapis.com/maps/api/place/details/json?place_id=${placeId}&fields=address_components,website&key=${apiKey}`;
 
     try {
         const response = await axios.get(url);
-        const components = response.data.result?.address_components || [];
+        const result = response.data.result;
+        const components = result?.address_components || [];
 
         const findComponent = (types: string[]) =>
             components.find((c: any) => types.every(type => c.types.includes(type)));
@@ -307,8 +311,18 @@ export const getPlaceDetails = async (placeId: string): Promise<{ city: string; 
     }
 };
 
-export const getUserLocation = async (): Promise<CustomCoordinates> => { // Make this async as we'll use await
-    // Try to get geolocation first (client-side only)
+
+const fetchGeocode = async (address: string): Promise<CustomCoordinates> => { 
+    try {
+        const response = await axios.get(`/api/geocode?address=${encodeURIComponent(address)}`);
+        return response.data; 
+    } catch (error) {
+        console.error("Error calling /api/geocode:", error);
+        throw new Error("Failed to geocode address via API.");
+    }
+};
+
+export const getUserLocation = async (): Promise<CustomCoordinates> => {
     if (typeof window !== 'undefined' && navigator.geolocation) {
         try {
             const position = await new Promise<GeolocationPosition>((resolve, reject) => {
@@ -324,72 +338,29 @@ export const getUserLocation = async (): Promise<CustomCoordinates> => { // Make
                 lng: position.coords.longitude,
             };
         } catch (error: any) {
-            console.warn("Geolocation API failed:", error.message);
-            // Fallback to geocoding if geolocation fails
-            // Do NOT return here, proceed to the fallback block
+            // Log the specific error from Geolocation API
+            console.error(`Geolocation API failed: ${error.message}. Please check browser permissions and ensure you are on a secure connection (HTTPS).`);
+            // Do NOT re-throw here, allow fallback to proceed
         }
     } else {
         console.warn("Geolocation is not supported by this browser or not running in a browser context.");
-        // Proceed to fallback block
     }
 
-    // --- Fallback to geocoding a specific address ---
+    // Fallback to geocoding a specific address if geolocation failed or is not supported
     try {
-        // Use a very specific address for Mantua, VA as the default fallback
         const defaultLocationQuery = "Mantua, Fairfax, Virginia, USA"; 
-        
-        console.log(`Geolocation failed. Attempting to geocode fallback address: "${defaultLocationQuery}"`);
-        const defaultCoords = await fetchGeocode(defaultLocationQuery);
+        console.log(`Attempting to geocode fallback address: "${defaultLocationQuery}"`);
+        const defaultCoords = await fetchGeocode(defaultLocationQuery); 
         console.log("Using fallback geocoded location:", defaultCoords.lat, defaultCoords.lng, "from query:", defaultLocationQuery);
         return defaultCoords;
     } catch (geocodeError: any) {
         console.error("Failed to get any location (geolocation failed and geocoding fallback failed):", geocodeError);
-        // As a last resort, provide hardcoded coordinates for Mantua, VA
         const hardcodedMantuaCoords = { lat: 38.8687, lng: -77.2684 }; 
         console.log("Using hardcoded fallback coordinates for Mantua, VA:", hardcodedMantuaCoords.lat, hardcodedMantuaCoords.lng);
         return hardcodedMantuaCoords;
     }
 };
 
-const fetchGeocode = async (address: string): Promise<CustomCoordinates> => {
-    try {
-        const response = await axios.get(`/api/geocode?address=${encodeURIComponent(address)}`);
-        return response.data; // This should return { lat: number, lng: number }
-    } catch (error) {
-        console.error("Error calling /api/geocode:", error);
-        throw new Error("Failed to geocode address via API.");
-    }
-};
-
-
-export const getCourseDetails = async (courseId: string): Promise<Course | null> => {
-    if (USE_MOCK_DATA) {
-        return mockCourses.find(course => course.id === courseId) || null;
-    } else {
-        const url = `https://maps.googleapis.com/maps/api/place/details/json?place_id=${courseId}&fields=name,geometry,website,address_component&key=${GOOGLE_MAPS_API_KEY}`;
-        try {
-            const response = await axios.get(url);
-            const result = response.data.result;
-            if (result) {
-                const { city, state } = await getPlaceDetails(courseId);
-                return {
-                    id: result.place_id,
-                    name: result.name,
-                    location: { lat: result.geometry.location.lat, lng: result.geometry.location.lng },
-                    type: 'public', //Default
-                    city,
-                    state,
-                    website: result.website
-
-                }
-            }
-            return null;
-
-        } catch (error){
-            return null;
-        }
-    }
-}
 
 export const getTeeTimes = async (courseId: string, date: string): Promise<TeeTime[]> => {
     return mockTeeTimes.find((t) => t.courseId === courseId)?.times || [];
@@ -421,28 +392,3 @@ export const getBookingRules = async (courseId: string) => {
         isPublic: true,
     };
 };
-
-function getDistanceFromLatLonInKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
-    const R = 6371; // Radius of the Earth in km
-    const dLat = deg2rad(lat2 - lat1);
-    const dLon = deg2rad(lon2 - lon1);
-    const a =
-        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-        Math.cos(deg2rad(lat1)) * Math.cos(deg2rad(lat2)) *
-        Math.sin(dLon / 2) * Math.sin(dLon / 2);
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-    return R * c; // Distance in kilometers
-}
-
-function deg2rad(deg: number) {
-    return deg * (Math.PI / 180);
-}
-
-function kmToMiles(km: number): number {
-    return km * 0.621371;
-}
-
-// Function to convert miles to meters (for Google Places API)
-function milesToMeters(miles: number): number {
-    return miles * 1609.34;
-}
