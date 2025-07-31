@@ -6,7 +6,6 @@ import QuickAction from './components/QuickAction';
 import CourseList from './components/CourseList';
 import Chatbot from './components/Chatbot'; 
 import styles from './styling/index.module.css';
-
 // Import CustomCoordinates and getUserLocation from your lib/golfApi.ts
 import { CustomCoordinates, getUserLocation } from '../lib/golfApi'; 
 // Import Course from your shared types file

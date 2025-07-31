@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { Search, MapPin, Users, Calendar, Clock, AlertCircle } from 'lucide-react';
 import { CustomCoordinates, getUserLocation } from '../../lib/golfApi';
+import '../styling/index.module.css';
 
 interface SearchBarProps {
     onSearch: (query: string, date: string, players: number, locationCoords: CustomCoordinates, timeOfDay?: string) => void;

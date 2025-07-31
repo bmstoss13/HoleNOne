@@ -1,4 +1,13 @@
+/* styles/index.module.css */
 
+/* Remove default body margins */
+
+body {
+    margin: 0;
+    padding: 0;
+    font-size: 18px; /* <--- Increased base font size from default (e.g., 16px to 17px or 18px) */
+    overflow-x: hidden;
+}
 
 /* Main container for the entire page */
 .home-page-container {
@@ -110,7 +119,7 @@
             margin-bottom: 1rem;
         }
 
-      
+        /* Enhanced search bar */
         .search-bar {
             display: flex;
             flex-wrap: wrap;
@@ -724,7 +733,7 @@
     box-shadow: 0 2px 8px rgba(26, 127, 90, 0.1);
 }
 
-.tee-time-card span:first-child{
+.tee-time-card span:first-child {
     font-weight: 600;
     color: #1f2937;
     font-size: 1rem;

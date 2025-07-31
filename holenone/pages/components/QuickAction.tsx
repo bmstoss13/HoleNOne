@@ -1,5 +1,6 @@
 import React from 'react';
 import { LucideIcon } from 'lucide-react';
+import '../styling/index.module.css';
 
 interface QuickActionProps { 
   text: string; 
